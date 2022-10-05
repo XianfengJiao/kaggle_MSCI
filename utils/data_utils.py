@@ -5,18 +5,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import scipy.sparse
 from colorama import Fore, Back, Style
 from matplotlib.ticker import MaxNLocator
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler, scale
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.dummy import DummyRegressor
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.linear_model import Ridge
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.metrics import mean_squared_error
+import scipy
 
 def setup_seed(seed):
      torch.manual_seed(seed)
@@ -24,6 +26,34 @@ def setup_seed(seed):
      np.random.seed(seed)
      random.seed(seed)
      torch.backends.cudnn.deterministic = True
+
+class PreprocessCiteseqWithExpert(BaseEstimator, TransformerMixin):
+    def __init__(self, n_components, important_cols_index) -> None:
+        super().__init__()
+        self.n_components = n_components
+        self.important_cols_index = important_cols_index
+    
+    def get_name(self):
+        return self.__class__.__name__ + '_' + str(self.n_components)
+    
+    def fit_transform(self, X):
+        gc.collect()
+        print(X.shape)
+        X_imp = X[:, self.important_cols_index]
+        self.pca = PCA(n_components=self.n_components, copy=False, random_state=1)
+        X = self.pca.fit_transform(X)
+        X = np.hstack([X, X_imp])
+        print(X.shape)
+        return X
+    
+    def transform(self, X):
+        print(X.shape)
+        gc.collect()
+        X_imp = X[:, self.important_cols_index]
+        X = self.pca.transform(X)
+        X = np.hstack([X, X_imp])
+        print(X.shape)
+        return X
 
 class PreprocessCiteseq(BaseEstimator, TransformerMixin):
     # columns_to_use = 12000
@@ -74,7 +104,33 @@ class PreprocessCiteseq(BaseEstimator, TransformerMixin):
         # plt.show()
         print(X.shape)
         return X
+
+
+class PreprocessMultiomeWithTruncatedSVD(BaseEstimator, TransformerMixin):
+    def __init__(self, n_components) -> None:
+        super().__init__()
+        self.n_components = n_components
     
+    def get_name(self):
+        return self.__class__.__name__ + '_' + str(self.n_components)
+    
+    def fit_transform(self, X):
+        print(X.shape)
+        self.svd = TruncatedSVD(n_components = self.n_components, random_state = 1)
+        X = self.svd.fit_transform(X)
+        print(X.shape)
+        return X
+    
+    def transform(self, X):
+        print(X.shape)
+        gc.collect()
+
+        X = self.svd.transform(X)
+        print(X.shape)
+        return X
+
+
+
 class PreprocessMultiome(BaseEstimator, TransformerMixin):
     # columns_to_use = slice(0, 14000)
     columns_to_use = None

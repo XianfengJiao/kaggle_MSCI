@@ -3,16 +3,17 @@ import sys
 import numpy as np
 import pandas as pd
 import pickle as pkl
+from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import Dataset
 sys.path.append("..")
 from utils.data_utils import PreprocessCiteseq
 
 class CiteseqDataset(Dataset):
-    def __init__(self, input_data, data_path, type, preprocessor=None, input_label=None, is_train=False):
+    def __init__(self, input_data, data_path, type, preprocessor=None, scaler=None, input_label=None, is_train=False):
         
         if preprocessor:
-            prefix = preprocessor.get_name()
+            prefix = preprocessor.get_name()+'_'+scaler.__class__.__name__
             preprocessed_path = os.path.join(data_path, type+'_cite_preprocessed_' + prefix +'.h5')
         else:
             preprocessed_path = os.path.join(data_path, type+'_cite_ori.h5')
@@ -30,6 +31,12 @@ class CiteseqDataset(Dataset):
                     pkl.dump(preprocessor, open(os.path.join(data_path, preprocessor.get_name()+'.pkl'), 'wb'))
             else:
                 input_preprocessed = input_data
+            
+            if scaler:
+                if is_train:
+                    scaler.fit(input_preprocessed)
+                input_preprocessed = scaler.transform(input_preprocessed)
+            
             print('#'*20,'Finish Processing Data','#'*20)
             self._save_h5(preprocessed_path, input_preprocessed)
         else:

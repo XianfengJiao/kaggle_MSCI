@@ -20,6 +20,7 @@ class Citeseq_Trainer(object):
         model,
         save_path,
         lr=1e-3,
+        early_stop=15,
         loss='mse',
         checkpoint=None,
         valid_loader=None,
@@ -39,6 +40,8 @@ class Citeseq_Trainer(object):
         self.optimizer = self.configure_optimizer()
         self.device = device
         self.metric_fn = correlation_score
+        self.early_stop = early_stop
+        self.remain_step = self.early_stop
         
         os.makedirs(self.log_dir, exist_ok=True)
         self.tensorwriter = SummaryWriter(log_dir)
@@ -77,12 +80,15 @@ class Citeseq_Trainer(object):
             eval_loss, eval_metric = self.evaluate(epoch)
             if eval_metric > self.best_cor:
                 self.best_cor = eval_metric
-                self.best_corr_model_path = os.path.join(self.save_path, 'best_corr'+str(eval_metric)+'.pth')
+                self.best_corr_model_path = os.path.join(self.save_path, 'best_corr.pth')
                 torch.save(self.model.state_dict(), self.best_corr_model_path)
+                self.remain_step = self.early_stop
+            else:
+                self.remain_step -= 1
             
             if eval_loss < self.best_loss:
                 self.best_loss = eval_loss
-                self.best_loss_model_path = os.path.join(self.save_path, 'best_loss'+str(eval_loss)+'.pth')
+                self.best_loss_model_path = os.path.join(self.save_path, 'best_loss.pth')
                 torch.save(self.model.state_dict(), self.best_loss_model_path)
     
     __call__ = train_epoch

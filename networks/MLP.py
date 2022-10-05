@@ -18,7 +18,7 @@ class MLP(nn.Module):
         self.relu = nn.ReLU()
         
     def forward(self, x):
-        x = self.fc1(x)
+        x = self.fc1(x) # batch_size x feature_size
         x = self.relu(self.bn1(x))
         
         x = x + self.fc2(x)

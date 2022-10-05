@@ -10,11 +10,10 @@ sys.path.append("..")
 from utils.data_utils import PreprocessMultiome
 
 class MultiomeDataset(Dataset):
-    def __init__(self, input_path, preprocessor=None, label_path=None, is_train=False, ref_size=12000, chunk_size=5000, ):
+    def __init__(self, input_path, preprocessor=None, scaler=None, label_path=None, is_train=False, ref_size=12000, chunk_size=5000, ):
         self.y_columns = None
-        
         if preprocessor:
-            prefix = preprocessor.get_name()
+            prefix = preprocessor.get_name()+'_'+scaler.__class__.__name__
             preprocessed_path = input_path.replace('.h5', '_ref_size_' + str(ref_size) +'_preprocessed_' + prefix +'.h5')
         else:
             preprocessed_path = input_path
@@ -23,8 +22,11 @@ class MultiomeDataset(Dataset):
         # if True:
             # -------------------------- Preprocessing DATA --------------------------
             input_ref_data = pd.read_hdf(input_path, start=0, stop=ref_size).values
-            preprocessor.fit_transform(input_ref_data)
-            pkl.dump(preprocessor, open(os.path.join(os.path.dirname(preprocessed_path), preprocessor.get_name()+'.pkl'), 'wb'))
+            input_ref_data = preprocessor.fit_transform(input_ref_data)
+            if scaler:
+                scaler.fit(input_ref_data)
+                pkl.dump(scaler, open(os.path.join(os.path.dirname(preprocessed_path), 'ref_size_' + str(ref_size) + '_' + preprocessor.get_name()+'_'+scaler.__class__.__name__+'.pkl'), 'wb'))
+            pkl.dump(preprocessor, open(os.path.join(os.path.dirname(preprocessed_path), 'ref_size_' + str(ref_size) + '_' + preprocessor.get_name()+'.pkl'), 'wb'))
             
             print('#'*20,'Start Processing Data','#'*20)
             start = 0
@@ -37,6 +39,9 @@ class MultiomeDataset(Dataset):
                     preprocessed_tmp = preprocessor.transform(input_data)
                 else:
                     preprocessed_tmp = input_data
+                
+                if scaler:
+                    preprocessed_tmp = scaler.transform(preprocessed_tmp)
                 
                 if start > 0:
                     input_preprocessed = np.vstack((input_preprocessed,preprocessed_tmp))
@@ -53,6 +58,7 @@ class MultiomeDataset(Dataset):
             self._save_h5(preprocessed_path, input_preprocessed)
         else:
             # -------------------------- Load Preprocessed DATA --------------------------
+            print("Found preprocessed data. Loading that!")
             input_preprocessed = pd.read_hdf(preprocessed_path).values
         
         input_preprocessed = torch.tensor(

@@ -8,6 +8,7 @@ from tqdm import tqdm
 import pandas as pd
 from torch import nn
 import numpy as np
+import scipy
 sys.path.append("..")
 from utils.metric_utils import correlation_score
 from utils.data_utils import prepare_submission
@@ -23,6 +24,7 @@ class Multiome_Trainer(object):
         model,
         save_path,
         lr=1e-3,
+        early_stop=15,
         loss='mse',
         checkpoint=None,
         valid_loader=None,
@@ -42,6 +44,8 @@ class Multiome_Trainer(object):
         self.optimizer = self.configure_optimizer()
         self.device = device
         self.metric_fn = correlation_score
+        self.early_stop = early_stop
+        self.remain_step = self.early_stop
         
         os.makedirs(self.log_dir, exist_ok=True)
         self.tensorwriter = SummaryWriter(log_dir)
@@ -77,7 +81,7 @@ class Multiome_Trainer(object):
         
         if loss_epoch < self.best_loss:
             self.best_loss = loss_epoch
-            self.best_loss_model_path = os.path.join(self.save_path, 'best_loss'+str(loss_epoch)+'.pth')
+            self.best_loss_model_path = os.path.join(self.save_path, 'best_loss.pth')
             torch.save(self.model.state_dict(), self.best_loss_model_path)
         
         if self.valid_loader:
@@ -85,8 +89,11 @@ class Multiome_Trainer(object):
             eval_loss, eval_metric = self.evaluate(epoch)
             if eval_metric > self.best_cor:
                 self.best_cor = eval_metric
-                self.best_corr_model_path = os.path.join(self.save_path, 'best_corr_'+str(eval_metric)+'.pth')
+                self.best_corr_model_path = os.path.join(self.save_path, 'best_corr.pth')
                 torch.save(self.model.state_dict(), self.best_corr_model_path)
+                self.remain_step = self.early_stop
+            else:
+                self.remain_step -= 1
     
     __call__ = train_epoch
     
@@ -116,8 +123,53 @@ class Multiome_Trainer(object):
         self.tensorwriter.add_scalar("eval_corr/epoch", corr, epoch)
         
         return loss, corr
+    
+    
+    def _get_submission_sparse(self, test_pred, evaluation_ids_fp, y_columns, test_multi_inputs_idxcol_fp):
+        eval_ids = pd.read_parquet(evaluation_ids_fp)
+        eval_ids.cell_id = eval_ids.cell_id.astype(pd.CategoricalDtype())
+        eval_ids.gene_id = eval_ids.gene_id.astype(pd.CategoricalDtype())
         
-    def inference(self, model, evaluation_ids_fp, multiome_test_input_fp, y_columns, preprocessor, chunksize=10000):
+        submission = pd.Series(name='target',
+                       index=pd.MultiIndex.from_frame(eval_ids), 
+                       dtype=np.float32)
+        # test_multi_inputs_idxcol_fp = '../input/multimodal-single-cell-as-sparse-matrix/test_multi_inputs_idxcol.npz'
+        test_index = np.load(test_multi_inputs_idxcol_fp,
+                    allow_pickle=True)["index"]
+        
+        cell_dict = dict((k,v) for v,k in enumerate(test_index)) 
+        assert len(cell_dict)  == len(test_index)
+
+        gene_dict = dict((k,v) for v,k in enumerate(y_columns))
+        assert len(gene_dict) == len(y_columns)
+        
+        eval_ids_cell_num = eval_ids.cell_id.apply(lambda x:cell_dict.get(x, -1))
+        eval_ids_gene_num = eval_ids.gene_id.apply(lambda x:gene_dict.get(x, -1))
+
+        valid_multi_rows = (eval_ids_gene_num !=-1) & (eval_ids_cell_num!=-1)
+        submission.iloc[valid_multi_rows] = test_pred[eval_ids_cell_num[valid_multi_rows].to_numpy(),
+                                                      eval_ids_gene_num[valid_multi_rows].to_numpy()]
+        del eval_ids_cell_num, eval_ids_gene_num, valid_multi_rows, eval_ids, test_index, y_columns
+        gc.collect()
+        return submission
+    
+    def inference_sparse(self, model, evaluation_ids_fp, multiome_test_input_fp, y_columns, preprocessor, test_multi_inputs_idxcol_fp, scaler=None):
+        # get prediction on test set
+        model.eval()
+        multi_test_x = scipy.sparse.load_npz(multiome_test_input_fp)
+        multi_test_x = preprocessor.transform(multi_test_x)
+        multi_test_x = torch.tensor(multi_test_x, dtype=torch.float32).to(self.device)
+        test_pred = model(multi_test_x).detach().cpu().numpy()
+        del multi_test_x
+        gc.collect()
+        
+        submission = self._get_submission_sparse(test_pred, evaluation_ids_fp, y_columns, test_multi_inputs_idxcol_fp)
+        return submission
+        
+        
+    
+    
+    def inference(self, model, evaluation_ids_fp, multiome_test_input_fp, y_columns, preprocessor, scaler=None, chunksize=10000):
         model.eval()
         submission, cell_id_set, eval_ids = prepare_submission(y_columns, evaluation_ids_fp)
         start = 0
@@ -131,6 +183,8 @@ class Multiome_Trainer(object):
             multi_test_index = multi_test_x.index
             multi_test_x = multi_test_x.values
             multi_test_x = preprocessor.transform(multi_test_x)
+            if scaler:
+                multi_test_x = scaler.transform(multi_test_x)
             multi_test_x = torch.tensor(multi_test_x, dtype=torch.float32).to(self.device)
             test_pred = model(multi_test_x).detach().cpu().numpy()
             test_pred = pd.DataFrame(test_pred,
@@ -141,7 +195,7 @@ class Multiome_Trainer(object):
             gc.collect()
             
             # Fill the predictions into the submission series row by row
-            for i, (index, row) in tqdm(enumerate(test_pred.iterrows())):
+            for (index, row) in tqdm(test_pred.iterrows()):
                 row = row.reindex(eval_ids.gene_id[eval_ids.cell_id == index])
                 submission.loc[index] = row.values
             print('na:', submission.isna().sum())
