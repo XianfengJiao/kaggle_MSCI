@@ -113,8 +113,8 @@ class Citeseq_Trainer(object):
         corr = self.metric_fn(all_pred, all_y)
         
         print(f"Epoch {epoch}:")
-        print(f"Eval Loss: {loss:.4f}")
-        print(f"Eval corr: {corr:.4f}")
+        print(f"Eval Loss: {loss:.4f} | Best Eval corr: {self.best_loss:.4f}")
+        print(f"Eval corr: {corr:.4f} | Best Eval corr: {self.best_cor:.4f}")
         self.tensorwriter.add_scalar("eval_loss/epoch", loss, epoch)
         self.tensorwriter.add_scalar("eval_corr/epoch", corr, epoch)
         

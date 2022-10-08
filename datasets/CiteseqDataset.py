@@ -10,19 +10,19 @@ sys.path.append("..")
 from utils.data_utils import PreprocessCiteseq
 
 class CiteseqDataset(Dataset):
-    def __init__(self, input_data, data_path, type, preprocessor=None, scaler=None, input_label=None, is_train=False):
+    def __init__(self, input_data, data_path, type, kfold=0, preprocessor=None, scaler=None, input_label=None, is_train=False):
         
         if preprocessor:
             prefix = preprocessor.get_name()+'_'+scaler.__class__.__name__
-            preprocessed_path = os.path.join(data_path, type+'_cite_preprocessed_' + prefix +'.h5')
+            preprocessed_path = os.path.join(data_path, prefix, 'kfold-'+str(kfold), type+'_cite_preprocessed_data.h5')
         else:
-            preprocessed_path = os.path.join(data_path, type+'_cite_ori.h5')
+            preprocessed_path = os.path.join(data_path, 'ori_cite', 'kfold-'+str(kfold), type+'_cite_ori.h5')
         
         if not os.path.isfile(preprocessed_path):
             # -------------------------- Preprocessing DATA --------------------------
             # input_data = pd.read_hdf(input_path).values
-            
-            print('#'*20,'Start Processing Data','#'*20)
+            os.makedirs(os.path.dirname(preprocessed_path), exist_ok=True)
+            print('#'*20,'Start Processing Data for fold', kfold,'#'*20)
             if preprocessor:
                 if not is_train:
                     input_preprocessed = preprocessor.transform(input_data)
@@ -37,7 +37,7 @@ class CiteseqDataset(Dataset):
                     scaler.fit(input_preprocessed)
                 input_preprocessed = scaler.transform(input_preprocessed)
             
-            print('#'*20,'Finish Processing Data','#'*20)
+            print('#'*20,'Finish Processing Data for fold', kfold,'#'*20)
             self._save_h5(preprocessed_path, input_preprocessed)
         else:
             # -------------------------- Load Preprocessed DATA --------------------------
@@ -54,7 +54,7 @@ class CiteseqDataset(Dataset):
             )
             self.data = [(x, y) for x, y in zip(input_preprocessed, input_label)]
         else:
-            print("Found preprocessed data. Loading that!")
+            print("Found preprocessed data for fold {}. Loading that!".format(kfold))
             self.data = input_preprocessed
     
     def __len__(self):
